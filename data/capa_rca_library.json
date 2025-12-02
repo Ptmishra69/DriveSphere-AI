@@ -1,0 +1,65 @@
+[
+  {
+    "id": "RCA001",
+    "failure_pattern": "Repeated battery failure within 18 months",
+    "root_cause": "Suboptimal battery supplier batch + high idling usage in hot climate",
+    "capa": "Replace supplier batch, implement battery soak test at 60C, update warranty checks",
+    "manufacturing_feedback": "Tighten supplier QC and require higher heat tolerance spec",
+    "confidence": 0.85,
+    "related_dtc_codes": []
+  },
+  {
+    "id": "RCA002",
+    "failure_pattern": "Engine overheating in hot regions",
+    "root_cause": "Under-dimensioned cooling system for high ambient temperatures",
+    "capa": "Use improved radiator fins, revise coolant composition, deploy thermostats with higher threshold",
+    "manufacturing_feedback": "Redesign cooling circuit for tropical climate operation",
+    "confidence": 0.9,
+    "related_dtc_codes": [
+      "P0128"
+    ]
+  },
+  {
+    "id": "RCA003",
+    "failure_pattern": "Brake pads wearing prematurely (<10000 km)",
+    "root_cause": "Lower friction material grade from vendor batch + heavy braking cycles in city traffic",
+    "capa": "Vendor audit, new material spec, roadside maintenance advisory",
+    "manufacturing_feedback": "Specify higher wear-rated friction material",
+    "confidence": 0.8,
+    "related_dtc_codes": []
+  },
+  {
+    "id": "RCA004",
+    "failure_pattern": "Frequent misfires and RPM instability",
+    "root_cause": "Ignition coil degradation and fuel injector clogging",
+    "capa": "Injector cleaning campaign + ignition coil supplier review",
+    "manufacturing_feedback": "Improve sealing to reduce soot ingress and tighten injector tolerances",
+    "confidence": 0.78,
+    "related_dtc_codes": [
+      "P0301"
+    ]
+  },
+  {
+    "id": "RCA005",
+    "failure_pattern": "Excessive oil pressure drop in older units",
+    "root_cause": "Thin oil passages develop leak paths + suboptimal oil spec",
+    "capa": "Introduce oil change interval recommendation and improved oil filter",
+    "manufacturing_feedback": "Revise oil gallery spec and material hardness",
+    "confidence": 0.72,
+    "related_dtc_codes": [
+      "P0500"
+    ]
+  },
+  {
+    "id": "RCA006",
+    "failure_pattern": "Catalytic converter efficiency drop (P0420)",
+    "root_cause": "Fuel mixture issues + suboptimal catalyst coating",
+    "capa": "ECU remap and catalyst coating supplier improvement",
+    "manufacturing_feedback": "Tighten catalyst deposition process control",
+    "confidence": 0.76,
+    "related_dtc_codes": [
+      "P0420",
+      "P0171"
+    ]
+  }
+]
