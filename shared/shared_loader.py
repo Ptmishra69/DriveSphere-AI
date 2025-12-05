@@ -4,72 +4,73 @@ from datetime import datetime
 from typing import Dict, List, Any
 
 from langchain_core.documents import Document
-import pandas as pd
 
 
-# ---------- Helper: Load JSON file safely ----------
+# ---------- Auto-correct base path ----------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
+
+def safe_path(filename: str) -> str:
+    return os.path.join(DATA_DIR, filename)
+
+
+# ---------- Safe JSON Loader ----------
 def load_json(file_path: str) -> Any:
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"JSON file not found: {file_path}")
+        raise FileNotFoundError(f"[shared_loader] JSON file not found: {file_path}")
 
     with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    return data
+        return json.load(f)
 
 
-# ---------- 1. Load VEHICLE PROFILE ----------
-def load_vehicle_profile(vehicle_id: str, base_path="../data/vehicle_profile.json") -> Dict:
-    vehicles = load_json(base_path)
+# ---------- VEHICLE PROFILES ----------
+def load_vehicle_profile(vehicle_id: str) -> Dict:
+    path = safe_path("vehicle_profiles.json")
+    data = load_json(path)
 
-    # If it's a list of vehicles
-    if isinstance(vehicles, list):
-        vehicle = next((v for v in vehicles if v["vehicle_id"] == vehicle_id), None)
-    else:
-        # Single-object JSON (your sample)
-        vehicle = vehicles if vehicles["vehicle_id"] == vehicle_id else None
+    # Normalize list / single object
+    vehicles = data if isinstance(data, list) else [data]
+
+    vehicle = next((v for v in vehicles if v["vehicle_id"] == vehicle_id), None)
 
     if vehicle is None:
-        raise ValueError(f"Vehicle ID {vehicle_id} NOT FOUND in vehicle_profile.json")
+        return {"error": f"Vehicle {vehicle_id} not found", "exists": False}
 
-    # Normalize missing values
+    # Enrich fields
     vehicle.setdefault("known_model_defect", "none")
     vehicle.setdefault("cost_sensitivity", False)
-
-    # Enrichment: risk profile
-    risk_index = _compute_vehicle_risk(vehicle)
-    vehicle["risk_index"] = risk_index
+    vehicle["risk_index"] = compute_vehicle_risk(vehicle)
 
     return vehicle
 
 
-
-# ---------- Enrichment Logic ----------
-def _compute_vehicle_risk(vehicle: Dict) -> float:
-    # Simple weighted formula based on age, usage, climate
-    age = datetime.now().year - int(vehicle["manufacturing_year"])
-    usage = vehicle["avg_km_per_day"]
-    climate_factor = 1.2 if vehicle["climate_zone"] == "Hot" else 1.0
-
-    risk = (age * 0.3 + usage * 0.02) * climate_factor
-    return round(min(risk, 1.0), 2)      # clamp between 0 - 1.0
-
+def compute_vehicle_risk(vehicle: Dict) -> float:
+    try:
+        age = datetime.now().year - int(vehicle.get("manufacturing_year", 2020))
+        usage = vehicle.get("avg_km_per_day", 10)
+        climate_factor = 1.2 if vehicle.get("climate_zone") == "Hot" else 1.0
+        risk = (age * 0.3 + usage * 0.02) * climate_factor
+        return round(min(risk, 1.0), 2)
+    except:
+        return 0.3
 
 
-# ---------- 2. Load MAINTENANCE HISTORY ----------
-def load_maintenance_history(vehicle_id: str, base_path="../data/maintenance_history.json") -> List[Dict]:
-    data = load_json(base_path)
+# ---------- MAINTENANCE HISTORY ----------
+def load_maintenance_history(vehicle_id: str) -> List[Dict]:
+    path = safe_path("maintenance_history.json")
+    data = load_json(path)
 
-    if isinstance(data, dict):  # if only one record
-        data = [data]
+    records = data if isinstance(data, list) else [data]
+    history = [r for r in records if r["vehicle_id"] == vehicle_id]
 
-    history = [h for h in data if h["vehicle_id"] == vehicle_id]
-
-    # Convert dates
+    # Convert timestamps safely
     for h in history:
-        h["date"] = datetime.fromisoformat(h["date"])
+        try:
+            h["date"] = datetime.fromisoformat(h["date"])
+        except:
+            h["date"] = None
 
-        # Normalize missing fields
         h.setdefault("components_serviced", [])
         h.setdefault("parts_replaced", [])
         h.setdefault("warranty_applied", False)
@@ -77,74 +78,66 @@ def load_maintenance_history(vehicle_id: str, base_path="../data/maintenance_his
     return history
 
 
+# ---------- LIVE TELEMATICS ----------
+def load_telematics(vehicle_id: str) -> Dict:
+    path = safe_path("live_telematics_feed.json")
+    data = load_json(path)
 
-# ---------- 3. Load LIVE TELEMATICS ----------
-def load_telematics(vehicle_id: str, base_path="../data/live_telematics.json") -> Dict:
-    data = load_json(base_path)
+    records = data if isinstance(data, list) else [data]
+    tele = next((r for r in records if r["vehicle_id"] == vehicle_id), None)
 
-    # If file contains multiple records
-    if isinstance(data, list):
-        record = next((r for r in data if r["vehicle_id"] == vehicle_id), None)
-    else:
-        record = data if data["vehicle_id"] == vehicle_id else None
+    if tele is None:
+        return {"error": f"No telematics for {vehicle_id}", "exists": False}
 
-    if record is None:
-        raise ValueError(f"No telematics data for vehicle {vehicle_id}")
+    # timestamp normalization
+    try:
+        tele["timestamp"] = datetime.fromisoformat(tele["timestamp"].replace("Z", ""))
+    except:
+        tele["timestamp"] = None
 
-    # Convert timestamp
-    record["timestamp"] = datetime.fromisoformat(record["timestamp"].replace("Z", ""))
+    # DTC normalization
+    dtc = tele.get("dtc_code")
+    tele["dtc_code_list"] = dtc if isinstance(dtc, list) else [dtc]
 
-    # Normalize DTC code
-    if isinstance(record["dtc_code"], str):
-        record["dtc_code_list"] = [record["dtc_code"]]
-    else:
-        record["dtc_code_list"] = record["dtc_code"]
-
-    # Add severity enrichment
-    record["engine_temp_status"] = _engine_temp_status(record["engine_temp_c"], record.get("coolant_temp_c"))
-
-    return record
+    # enrich engine temp severity
+    tele["engine_temp_status"] = engine_temp_status(
+        tele.get("engine_temp_c", 0),
+        tele.get("coolant_temp_c", 0),
+    )
+    return tele
 
 
-
-# ---------- Telematics Severity Enrichment ----------
-def _engine_temp_status(engine_temp: float, coolant_temp: float) -> str:
+def engine_temp_status(engine_temp: float, coolant_temp: float) -> str:
     if engine_temp < 85:
         return "normal"
-    elif 85 <= engine_temp <= 100:
+    elif engine_temp <= 100:
         return "elevated"
-    else:
-        return "overheating"
+    return "overheating"
 
 
+# ---------- CAPA/RCA DOCS ----------
+def load_capa_rca_docs() -> List[Document]:
+    path = safe_path("capa_rca_library.json")
+    data = load_json(path)
 
-# ---------- 4. Load CAPA/RCA Library ----------
-def load_capa_rca_docs(base_path="../data/capa_rca_library.json") -> List[Document]:
-    data = load_json(base_path)
+    entries = data if isinstance(data, list) else [data]
+    docs = []
 
-    # Convert single entry → list
-    if isinstance(data, dict):
-        data = [data]
-
-    documents = []
-
-    for entry in data:
+    for e in entries:
         content = (
-            f"Failure Pattern: {entry['failure_pattern']}\n"
-            f"Root Cause: {entry['root_cause']}\n"
-            f"CAPA Recommendation: {entry['capa']}\n"
-            f"Manufacturing Feedback: {entry['manufacturing_feedback']}"
+            f"Failure Pattern: {e['failure_pattern']}\n"
+            f"Root Cause: {e['root_cause']}\n"
+            f"CAPA: {e['capa']}\n"
+            f"Feedback: {e['manufacturing_feedback']}"
         )
-
-        doc = Document(
-            page_content=content,
-            metadata={
-                "id": entry["id"],
-                "confidence": entry.get("confidence", 0.5),
-                "related_dtc_codes": entry.get("related_dtc_codes", [])
-            }
+        docs.append(
+            Document(
+                page_content=content,
+                metadata={
+                    "id": e["id"],
+                    "confidence": e.get("confidence", 0.5),
+                    "related_dtc_codes": e.get("related_dtc_codes", [])
+                }
+            )
         )
-
-        documents.append(doc)
-
-    return documents
+    return docs
