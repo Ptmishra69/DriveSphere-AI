@@ -4,8 +4,12 @@ import os
 from datetime import datetime
 from typing import List, Dict, Any
 
-LOG_PATH = os.path.join("..", "..", "data", "agent_activity_logs.json")
-ALERT_PATH = os.path.join("..", "..", "data", "ueba_alerts.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "..", "..", "data")
+
+LOG_PATH = os.path.join(DATA_DIR, "agent_activity_logs.json")
+ALERT_PATH = os.path.join(DATA_DIR, "ueba_alerts.json")
+
 
 def _ensure_file(path: str, default):
     if not os.path.exists(path):

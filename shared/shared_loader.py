@@ -1,3 +1,5 @@
+# shared/shared_loader.py
+
 import json
 import os
 from datetime import datetime
@@ -6,69 +8,65 @@ from typing import Dict, List, Any
 from langchain_core.documents import Document
 
 
-# ---------- Auto-correct base path ----------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+# ---------- Base path helpers ----------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))        # /shared
+DATA_DIR = os.path.join(BASE_DIR, "..", "data")              # /data
 
 
-def safe_path(filename: str) -> str:
+def _path(filename: str) -> str:
     return os.path.join(DATA_DIR, filename)
 
 
-# ---------- Safe JSON Loader ----------
-def load_json(file_path: str) -> Any:
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"[shared_loader] JSON file not found: {file_path}")
-
-    with open(file_path, "r", encoding="utf-8") as f:
+def _load_json(path: str) -> Any:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"[shared_loader] JSON file not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-# ---------- VEHICLE PROFILES ----------
+# ---------- 1. VEHICLE PROFILES ----------
 def load_vehicle_profile(vehicle_id: str) -> Dict:
-    path = safe_path("vehicle_profiles.json")
-    data = load_json(path)
+    path = _path("vehicle_profiles.json")
+    data = _load_json(path)
 
-    # Normalize list / single object
     vehicles = data if isinstance(data, list) else [data]
+    v = next((x for x in vehicles if x.get("vehicle_id") == vehicle_id), None)
 
-    vehicle = next((v for v in vehicles if v["vehicle_id"] == vehicle_id), None)
+    if v is None:
+        return {"exists": False, "vehicle_id": vehicle_id, "error": f"Vehicle {vehicle_id} not found"}
 
-    if vehicle is None:
-        return {"error": f"Vehicle {vehicle_id} not found", "exists": False}
+    # Default fields
+    v.setdefault("known_model_defect", "none")
+    v.setdefault("cost_sensitivity", False)
 
-    # Enrich fields
-    vehicle.setdefault("known_model_defect", "none")
-    vehicle.setdefault("cost_sensitivity", False)
-    vehicle["risk_index"] = compute_vehicle_risk(vehicle)
-
-    return vehicle
-
-
-def compute_vehicle_risk(vehicle: Dict) -> float:
+    # Simple risk score
     try:
-        age = datetime.now().year - int(vehicle.get("manufacturing_year", 2020))
-        usage = vehicle.get("avg_km_per_day", 10)
-        climate_factor = 1.2 if vehicle.get("climate_zone") == "Hot" else 1.0
+        age = datetime.now().year - int(v.get("manufacturing_year", 2020))
+        usage = v.get("avg_km_per_day", 10)
+        climate_factor = 1.2 if v.get("climate_zone") == "Hot" else 1.0
         risk = (age * 0.3 + usage * 0.02) * climate_factor
-        return round(min(risk, 1.0), 2)
-    except:
-        return 0.3
+        v["risk_index"] = round(min(risk, 1.0), 2)
+    except Exception:
+        v["risk_index"] = 0.3
+
+    v["exists"] = True
+    return v
 
 
-# ---------- MAINTENANCE HISTORY ----------
+# ---------- 2. MAINTENANCE HISTORY ----------
 def load_maintenance_history(vehicle_id: str) -> List[Dict]:
-    path = safe_path("maintenance_history.json")
-    data = load_json(path)
+    path = _path("maintenance_history.json")
+    data = _load_json(path)
 
     records = data if isinstance(data, list) else [data]
-    history = [r for r in records if r["vehicle_id"] == vehicle_id]
+    history = [r for r in records if r.get("vehicle_id") == vehicle_id]
 
-    # Convert timestamps safely
     for h in history:
+        # Robust date parsing
+        date_str = h.get("date")
         try:
-            h["date"] = datetime.fromisoformat(h["date"])
-        except:
+            h["date"] = datetime.fromisoformat(date_str) if date_str else None
+        except Exception:
             h["date"] = None
 
         h.setdefault("components_serviced", [])
@@ -78,57 +76,55 @@ def load_maintenance_history(vehicle_id: str) -> List[Dict]:
     return history
 
 
-# ---------- LIVE TELEMATICS ----------
+# ---------- 3. LIVE TELEMATICS ----------
 def load_telematics(vehicle_id: str) -> Dict:
-    path = safe_path("live_telematics_feed.json")
-    data = load_json(path)
+    path = _path("live_telematics_feed.json")
+    data = _load_json(path)
 
     records = data if isinstance(data, list) else [data]
-    tele = next((r for r in records if r["vehicle_id"] == vehicle_id), None)
+    rec = next((r for r in records if r.get("vehicle_id") == vehicle_id), None)
 
-    if tele is None:
-        return {"error": f"No telematics for {vehicle_id}", "exists": False}
+    if rec is None:
+        return {"exists": False, "vehicle_id": vehicle_id, "error": f"No telematics for {vehicle_id}"}
 
-    # timestamp normalization
+    # Normalize timestamp
+    ts = rec.get("timestamp")
     try:
-        tele["timestamp"] = datetime.fromisoformat(tele["timestamp"].replace("Z", ""))
-    except:
-        tele["timestamp"] = None
+        rec["timestamp"] = datetime.fromisoformat(ts.replace("Z", "")) if ts else None
+    except Exception:
+        rec["timestamp"] = None
 
-    # DTC normalization
-    dtc = tele.get("dtc_code")
-    tele["dtc_code_list"] = dtc if isinstance(dtc, list) else [dtc]
+    # Normalize DTC
+    dtc = rec.get("dtc_code")
+    rec["dtc_code_list"] = dtc if isinstance(dtc, list) else [dtc]
 
-    # enrich engine temp severity
-    tele["engine_temp_status"] = engine_temp_status(
-        tele.get("engine_temp_c", 0),
-        tele.get("coolant_temp_c", 0),
-    )
-    return tele
-
-
-def engine_temp_status(engine_temp: float, coolant_temp: float) -> str:
+    # Simple engine temp status
+    engine_temp = rec.get("engine_temp_c", 0)
     if engine_temp < 85:
-        return "normal"
+        rec["engine_temp_status"] = "normal"
     elif engine_temp <= 100:
-        return "elevated"
-    return "overheating"
+        rec["engine_temp_status"] = "elevated"
+    else:
+        rec["engine_temp_status"] = "overheating"
+
+    rec["exists"] = True
+    return rec
 
 
-# ---------- CAPA/RCA DOCS ----------
+# ---------- 4. CAPA / RCA DOCS ----------
 def load_capa_rca_docs() -> List[Document]:
-    path = safe_path("capa_rca_library.json")
-    data = load_json(path)
+    path = _path("capa_rca_library.json")
+    data = _load_json(path)
 
     entries = data if isinstance(data, list) else [data]
-    docs = []
+    docs: List[Document] = []
 
     for e in entries:
         content = (
             f"Failure Pattern: {e['failure_pattern']}\n"
             f"Root Cause: {e['root_cause']}\n"
-            f"CAPA: {e['capa']}\n"
-            f"Feedback: {e['manufacturing_feedback']}"
+            f"CAPA Recommendation: {e['capa']}\n"
+            f"Manufacturing Feedback: {e['manufacturing_feedback']}"
         )
         docs.append(
             Document(
@@ -140,4 +136,5 @@ def load_capa_rca_docs() -> List[Document]:
                 }
             )
         )
+
     return docs

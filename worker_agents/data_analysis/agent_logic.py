@@ -1,167 +1,95 @@
-import json
-from datetime import datetime
+# worker_agents/data_analysis/agent_logic.py
 
-from langchain_openai import ChatOpenAI
-from langchain.agents import create_openai_functions_agent, AgentExecutor
+from typing import Dict, Any
 
-from .tools import (
-    get_vehicle_profile,
-    get_historical_usage,
-    get_telematics_snapshot
+from shared.shared_loader import (
+    load_telematics,
+    load_vehicle_profile,
+    load_maintenance_history,
 )
 
 
-# ============================================================
-# CLEAN JSON SERIALIZER
-# ============================================================
-
-def clean_json(obj):
-    """Recursively convert datetime → ISO and ensure JSON-safe output."""
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    if isinstance(obj, dict):
-        return {k: clean_json(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [clean_json(i) for i in obj]
-    return obj
-
-
-# ============================================================
-# RULE-BASED ANOMALY DETECTION
-# ============================================================
-
-def detect_raw_anomalies(telematics: dict):
+def detect_raw_anomalies(telematics: Dict[str, Any]):
+    """
+    Simple rule-based anomaly detector.
+    Works even if some fields are missing.
+    """
     anomalies = []
 
-    if not isinstance(telematics, dict):
-        return [{"component": "system", "type": "invalid_telematics_data", "severity": "high"}]
+    if not isinstance(telematics, dict) or not telematics.get("exists", True):
+        anomalies.append({
+            "component": "system",
+            "type": "no_telematics_data",
+            "severity": "high"
+        })
+        return anomalies
 
-    et = telematics.get("engine_temp_c", 0)
-    if et > 100:
-        anomalies.append({"component": "engine", "type": "overheating", "severity": "high"})
-    elif et > 85:
-        anomalies.append({"component": "engine", "type": "elevated_temperature", "severity": "medium"})
+    engine_temp = telematics.get("engine_temp_c", 0)
+    brake_wear = telematics.get("brake_pad_wear_pct", 100)
+    battery_health = telematics.get("battery_health_pct", 100)
+    oil_pressure = telematics.get("oil_pressure_psi", 100)
 
-    if telematics.get("brake_pad_wear_pct", 100) < 20:
-        anomalies.append({"component": "brake_system", "type": "brake_pad_thin", "severity": "medium"})
+    # Engine temperature rules
+    if engine_temp > 100:
+        anomalies.append({
+            "component": "engine",
+            "type": "overheating",
+            "severity": "high"
+        })
+    elif engine_temp > 85:
+        anomalies.append({
+            "component": "engine",
+            "type": "elevated_temperature",
+            "severity": "medium"
+        })
 
-    if telematics.get("battery_health_pct", 100) < 40:
-        anomalies.append({"component": "battery", "type": "battery_health_low", "severity": "high"})
+    # Brake pad wear
+    if brake_wear < 20:
+        anomalies.append({
+            "component": "brake_system",
+            "type": "brake_pad_thin",
+            "severity": "medium"
+        })
 
-    if telematics.get("oil_pressure_psi", 100) < 25:
-        anomalies.append({"component": "engine", "type": "low_oil_pressure", "severity": "high"})
+    # Battery health
+    if battery_health < 40:
+        anomalies.append({
+            "component": "battery",
+            "type": "battery_health_low",
+            "severity": "high"
+        })
+
+    # Oil pressure
+    if oil_pressure < 25:
+        anomalies.append({
+            "component": "engine",
+            "type": "low_oil_pressure",
+            "severity": "high"
+        })
 
     return anomalies
 
 
-# ============================================================
-# LLM AGENT FACTORY — NEW LANGCHAIN v0.3 API
-# ============================================================
-
-def llm_reasoning_agent():
-    """Builds an OpenAI Functions Agent (new LangChain API)."""
-
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.2
-    )
-
-    tools = [
-        get_vehicle_profile,
-        get_historical_usage,
-        get_telematics_snapshot
-    ]
-
-    # Build the agent
-    agent = create_openai_functions_agent(
-        llm=llm,
-        tools=tools
-    )
-
-    # Wrap with AgentExecutor (new required wrapper)
-    return AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=False
-    )
-
-
-# ============================================================
-# MAIN TELEMATICS ANALYSIS PIPELINE
-# ============================================================
-
-def analyze_vehicle_telematics(vehicle_id: str):
-
-    # --------------------------------------------------------
-    # STEP 1 — Load telematics via TOOL
-    # --------------------------------------------------------
-    try:
-        telematics = get_telematics_snapshot.run(vehicle_id)
-    except Exception as e:
-        return {
-            "vehicle_id": vehicle_id,
-            "error": f"Failed to load telematics: {str(e)}"
-        }
-
-    telematics_safe = clean_json(telematics)
-
-    # --------------------------------------------------------
-    # STEP 2 — Rule-based detection
-    # --------------------------------------------------------
-    rule_anomalies = detect_raw_anomalies(telematics_safe)
-
-    # --------------------------------------------------------
-    # STEP 3 — Build LLM reasoning prompt
-    # --------------------------------------------------------
-    llm_input = f"""
-    You are an automotive diagnostics expert.
-
-    Analyze the vehicle telematics and infer deeper mechanical failures.
-
-    Vehicle ID: {vehicle_id}
-    Telematics JSON: {json.dumps(telematics_safe)}
-
-    STRICT JSON OUTPUT ONLY:
-    {{
-      "vehicle_id": "{vehicle_id}",
-      "ai_inferred_alerts": [
-        {{
-          "component": "...",
-          "issue": "...",
-          "severity": "..."
-        }}
-      ]
-    }}
+def analyze_vehicle_telematics(vehicle_id: str) -> Dict[str, Any]:
+    """
+    MAIN ANALYSIS FUNCTION
+    Called by FastAPI in main.py
     """
 
-    # --------------------------------------------------------
-    # STEP 4 — Invoke LLM agent
-    # --------------------------------------------------------
-    agent = llm_reasoning_agent()
+    # 1) Load raw data safely
+    tele = load_telematics(vehicle_id)
+    profile = load_vehicle_profile(vehicle_id)
+    history = load_maintenance_history(vehicle_id)
 
-    try:
-        # New API returns a dict: {"output": "...", "logs": "..."}
-        response = agent.invoke({"input": llm_input})
-        llm_output = response.get("output", '{"ai_inferred_alerts": []}')
-    except Exception as e:
-        print("LLM ERROR:", e)
-        llm_output = '{"ai_inferred_alerts": []}'
+    # 2) Detect anomalies
+    alerts = detect_raw_anomalies(tele)
 
-    # --------------------------------------------------------
-    # STEP 5 — Parse LLM JSON safely
-    # --------------------------------------------------------
-    try:
-        llm_data = json.loads(llm_output)
-    except:
-        llm_data = {"ai_inferred_alerts": []}
-
-    # --------------------------------------------------------
-    # STEP 6 — Final merged output
-    # --------------------------------------------------------
-    final = {
+    # 3) Build response (clean_json in main.py will make datetimes serializable)
+    return {
         "vehicle_id": vehicle_id,
-        "alerts": rule_anomalies,                     # Rule-based
-        "ai_inferred_alerts": llm_data.get("ai_inferred_alerts", [])  # LLM based
+        "telematics_found": tele.get("exists", False),
+        "vehicle_profile_found": profile.get("exists", False),
+        "maintenance_records": len(history),
+        "alerts": alerts,
+        "raw_telematics": tele,
     }
-
-    return clean_json(final)
