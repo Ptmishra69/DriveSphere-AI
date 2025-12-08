@@ -1,21 +1,47 @@
-# main.py
+# worker_agents/diagnosis_agent/main.py
+
+import sys, os
 from fastapi import FastAPI
 from pydantic import BaseModel
-from .agent_logic import diagnose_vehicle
-import uvicorn
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="Diagnosis Agent", version="1.0.0")
+# Add project root to PYTHONPATH
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-class DiagnoseRequest(BaseModel):
+from shared.vectorstore import get_vectorstore
+from worker_agents.diagnosis_agent.agent_logic import diagnose_vehicle
+
+
+# -----------------------------
+# 🚀 Lifespan Handler (Startup + Shutdown)
+# -----------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("⚡ [Startup] Preloading FAISS vectorstore...")
+    get_vectorstore()   # loads global vectorstore once
+    print("✔ Vectorstore ready.")
+
+    yield  # ---- Application Runs Here ----
+
+    print("🛑 [Shutdown] DiagnosisAgent shutting down.")
+
+
+# -----------------------------
+# 🚀 FastAPI App Initialization
+# -----------------------------
+app = FastAPI(title="Diagnosis Agent", lifespan=lifespan)
+
+
+# -----------------------------
+# Request Model
+# -----------------------------
+class DiagnosisRequest(BaseModel):
     vehicle_id: str
 
-@app.post("/diagnose")
-def diagnose(req: DiagnoseRequest):
-    """
-    Diagnose endpoint expects a vehicle_id and returns a JSON diagnosis object.
-    """
-    result = diagnose_vehicle(req.vehicle_id)
-    return result
 
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+# -----------------------------
+# API Endpoint
+# -----------------------------
+@app.post("/diagnose")
+def diagnose(req: DiagnosisRequest):
+    return diagnose_vehicle(req.vehicle_id)

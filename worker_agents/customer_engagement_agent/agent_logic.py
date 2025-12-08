@@ -1,103 +1,127 @@
-# agent_logic.py
+# agent_logic.py   (Customer Engagement Agent using UEBA logs)
 
-from langchain_openai import ChatOpenAI
-from langchain.agents import initialize_agent, AgentType
-from .tools import (
-    get_vehicle_profile_tool,
-    get_maintenance_history_tool
-)
-from .message_templates import (
-    intro_line,
-    persuasive_line,
-    safety_line,
-    closing_line
-)
 import json
+import os
+from datetime import datetime
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+import torch
+
+UEBA_LOG_PATH = os.path.join("..", "..", "data", "agent_activity_logs.json")
+
+MODEL_NAME = "google/flan-t5-base"
+_tokenizer = None
+_model = None
 
 
-def build_engagement_agent():
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.3
-    )
+# ---------------------------------------------------------
+# Load HuggingFace LLM (FREE, offline)
+# ---------------------------------------------------------
+def load_llm():
+    global _tokenizer, _model
+    if _tokenizer is None or _model is None:
+        _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        _model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+    return _tokenizer, _model
 
-    tools = [
-        get_vehicle_profile_tool,
-        get_maintenance_history_tool
+
+def llm_generate(prompt: str, max_length=256):
+    tokenizer, model = load_llm()
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True)
+    with torch.no_grad():
+        output = model.generate(
+            **inputs,
+            max_length=max_length,
+            do_sample=True,
+            temperature=0.4,
+            top_p=0.9
+        )
+
+    return tokenizer.decode(output[0], skip_special_tokens=True)
+
+
+# ---------------------------------------------------------
+# Load UEBA logs
+# ---------------------------------------------------------
+def load_ueba_logs():
+    if not os.path.exists(UEBA_LOG_PATH):
+        return []
+    with open(UEBA_LOG_PATH, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except:
+            return []
+
+
+# ---------------------------------------------------------
+# Extract latest diagnosis + analysis from UEBA logs
+# ---------------------------------------------------------
+def get_latest_agent_output(vehicle_id: str, agent_name: str):
+    logs = load_ueba_logs()
+
+    filtered = [
+        entry for entry in logs
+        if entry.get("agent_name") == agent_name
+        and entry.get("extra", {}).get("vehicle_id") == vehicle_id
+        and "response_json" in entry.get("extra", {})
     ]
 
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.OPENAI_FUNCTIONS,
-        verbose=False
-    )
-    return agent
+    if not filtered:
+        return None
+
+    # sort by timestamp descending
+    filtered.sort(key=lambda x: x["timestamp"], reverse=True)
+    return filtered[0]["extra"]["response_json"]
 
 
-def generate_engagement(vehicle_id: str, diagnosis: dict):
-    agent = build_engagement_agent()
+# ---------------------------------------------------------
+# Generate Customer Message
+# ---------------------------------------------------------
+def generate_engagement(vehicle_id: str):
 
-    # Extract key fields from diagnosis
-    failure = diagnosis["predicted_failure"]["predicted_failure"]
-    urgency = diagnosis["predicted_failure"]["urgency"]
-    issue_comp = diagnosis["predicted_failure"]["component"]
+    # 1️⃣ Get latest data-analysis result from UEBA logs
+    analysis = get_latest_agent_output(vehicle_id, "DataAnalysisAgent")
 
-    # Load vehicle context
-    profile = get_vehicle_profile_tool.run(vehicle_id)
-    history = get_maintenance_history_tool.run(vehicle_id)
+    # 2️⃣ Get latest diagnosis result from UEBA logs
+    diagnosis = get_latest_agent_output(vehicle_id, "DiagnosisAgent")
 
-    model = profile["model"]
-    cost_sensitive = profile.get("cost_sensitivity", False)
-    climate = profile.get("climate_zone")
-
-    # Build structured base message (before LLM refinement)
-    base_message = {
-        "intro": intro_line(model, urgency),
-        "explanation": f"We found an issue related to your {failure}.",
-        "persuasion": persuasive_line(cost_sensitive, failure),
-        "safety": safety_line(urgency),
-        "close": closing_line(),
-        "context": {
-            "vehicle": profile,
-            "history": len(history),
-            "urgency": urgency,
-            "climate_zone": climate
+    if diagnosis is None:
+        return {
+            "error": "No diagnosis found in UEBA logs. Cannot generate engagement."
         }
-    }
 
-    # Prompt for LLM refinement
+    # 3️⃣ Prepare prompt
     prompt = f"""
-    Convert the following technical structure into a friendly,
-    human-like, persuasive message for the vehicle owner.
+You are a service assistant. Explain the issue to the vehicle owner in friendly, clear language.
 
-    Maintain clarity, empathy, and action-orientation.
+DATA ANALYSIS:
+{json.dumps(analysis, indent=2)}
 
-    DATA:
-    {json.dumps(base_message, indent=2)}
+DIAGNOSIS:
+{json.dumps(diagnosis, indent=2)}
 
-    Return ONLY JSON:
-    {{
-        "full_message": "...",
-        "short_push_notification": "...",
-        "voice_script": "..."
-    }}
-    """
+Write these outputs:
+1. full_message - friendly explanation
+2. short_push_notification - under 80 chars
+3. voice_script - natural spoken sentence
 
-    result_raw = agent.run(prompt)
+Return ONLY JSON.
+"""
 
-    # Parse JSON safely
+    # 4️⃣ Run HuggingFace LLM
+    raw = llm_generate(prompt)
+
+    # 5️⃣ Try parsing JSON from HF output
     try:
-        result = json.loads(result_raw)
+        result = json.loads(raw)
     except:
+        # fallback: create simple message
+        failure = diagnosis["predicted_failure"]["predicted_failure"]
+        urgency = diagnosis["predicted_failure"]["urgency"]
+
         result = {
-            "full_message": (
-                f"{base_message['intro']} {base_message['explanation']} "
-                f"{base_message['persuasion']} {base_message['safety']} "
-                f"{base_message['close']}"
-            ),
-            "short_push_notification": f"Issue detected: {failure}. Tap to schedule service.",
-            "voice_script": f"Hello! This is your Hero assistant. {base_message['intro']} {base_message['explanation']} {base_message['safety']}"
+            "full_message": f"We detected an issue: {failure}. Urgency: {urgency}. Please service soon.",
+            "short_push_notification": f"Issue: {failure}.",
+            "voice_script": f"Your vehicle has an issue: {failure}. It is {urgency} urgency."
         }
 
     return result

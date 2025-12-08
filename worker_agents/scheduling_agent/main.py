@@ -6,7 +6,6 @@ from .agent_logic import schedule_appointment
 
 app = FastAPI(
     title="Scheduling Agent",
-    description="Handles scheduling of appointments based on urgency & slot availability.",
     version="1.0.0"
 )
 
@@ -18,9 +17,8 @@ class ScheduleRequest(BaseModel):
 
 @app.post("/schedule")
 def schedule(req: ScheduleRequest):
-    output = schedule_appointment(
+    return schedule_appointment(
         req.vehicle_id,
         req.diagnosis,
         req.customer_preference
     )
-    return output

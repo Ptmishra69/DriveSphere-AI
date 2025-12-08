@@ -1,213 +1,109 @@
-# agent_logic.py
+# worker_agents/diagnosis_agent/agent_logic.py
 
-import json
-from typing import Dict, Any, List
-from langchain_openai import ChatOpenAI
-from .tools import (
-    get_vehicle_profile_tool,
-    get_maintenance_history_tool,
-    get_telematics_snapshot_tool,
+from shared.shared_loader import (
+    load_vehicle_profile,
+    load_telematics,
+    load_maintenance_history,
 )
-from .vectorstore_builder import get_vectorstore
+
+from shared.vectorstore import get_vectorstore
 
 
-# --------------------------------------------------
-#   SIMPLE RULE-BASED CANDIDATE GENERATION
-# --------------------------------------------------
+# ---------- RULE-BASED DIAGNOSTICS ----------
+def rule_based_signals(tele):
+    alerts = []
 
-def _simple_rule_predict(telematics: Dict[str, Any]) -> List[Dict]:
-    candidates = []
-
-    et = telematics.get("engine_temp_c")
-    batt = telematics.get("battery_health_pct")
-    oilp = telematics.get("oil_pressure_psi")
-    brake_wear = telematics.get("brake_pad_wear_pct")
-    dtc_list = telematics.get("dtc_code_list", [])
-
-    # Engine overheating
-    if et and et > 100:
-        candidates.append({
-            "predicted_failure": "Engine Overheating (cooling system)",
-            "component": "engine/cooling",
-            "base_confidence": 0.7,
-            "reason": f"engine_temp_c={et}"
-        })
-    elif et and 85 < et <= 100:
-        candidates.append({
-            "predicted_failure": "Elevated Engine Temperature (monitor)",
+    if tele.get("engine_temp_c", 0) > 95:
+        alerts.append({
             "component": "engine",
-            "base_confidence": 0.45,
-            "reason": f"engine_temp_c={et}"
+            "issue": "overheating",
+            "severity": "high"
         })
 
-    # Battery
-    if batt is not None and batt < 45:
-        candidates.append({
-            "predicted_failure": "Battery Degradation",
-            "component": "electrical/battery",
-            "base_confidence": 0.6,
-            "reason": f"battery_health_pct={batt}"
+    if tele.get("brake_pad_wear_pct", 100) < 15:
+        alerts.append({
+            "component": "brakes",
+            "issue": "pad_wear_low",
+            "severity": "medium"
         })
 
-    # Oil pressure
-    if oilp is not None and oilp < 25:
-        candidates.append({
-            "predicted_failure": "Low Oil Pressure",
-            "component": "engine/lubrication",
-            "base_confidence": 0.8,
-            "reason": f"oil_pressure_psi={oilp}"
+    if tele.get("battery_health_pct", 100) < 40:
+        alerts.append({
+            "component": "battery",
+            "issue": "weak_battery",
+            "severity": "medium"
         })
 
-    # Brake pads
-    if brake_wear is not None and brake_wear < 20:
-        candidates.append({
-            "predicted_failure": "Brake Pads Worn",
-            "component": "brake_system",
-            "base_confidence": 0.65,
-            "reason": f"brake_pad_wear_pct={brake_wear}"
-        })
-
-    # DTC codes
-    for code in dtc_list:
-        if code and code.startswith("P0"):
-            candidates.append({
-                "predicted_failure": f"OBD Diagnostic code {code}",
-                "component": "electronic/ecu",
-                "base_confidence": 0.5,
-                "reason": f"dtc_code={code}"
-            })
-
-    return candidates
+    return alerts
 
 
+# ---------- RETRIEVAL FROM CAPA / RCA VECTORSTORE ----------
+def capa_similarity(tele, rule_alerts):
+    rule_summary = " ".join([f"{a['component']} {a['issue']}" for a in rule_alerts])
 
-# --------------------------------------------------
-#   CONFIDENCE MAPPING + URGENCY RULES
-# --------------------------------------------------
-
-def _map_confidence_with_history(base_conf: float, history_summary: Dict) -> float:
-    if history_summary.get("recurring_issues"):
-        return min(1.0, base_conf + 0.15)
-    if history_summary.get("declined_repairs", 0) > 0:
-        return min(1.0, base_conf + 0.05)
-    return base_conf
-
-
-def _urgency_from_conf(conf: float) -> str:
-    if conf >= 0.8:
-        return "high"
-    if conf >= 0.5:
-        return "medium"
-    return "low"
-
-
-
-# --------------------------------------------------
-#   SAFE LLM INTEGRATION (NO HANGS)
-# --------------------------------------------------
-
-def _llm_refine_predictions(vehicle_id: str, telematics: Dict, candidates: List[Dict], history_summary: Dict):
-    """
-    Safer LLM call (invoke + timeout + fallback).
-    Will NEVER block the agent.
-    """
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, timeout=20)
-
-    prompt = f"""
-    You are an automotive diagnostics expert.
-
-    Vehicle ID: {vehicle_id}
-    Telematics: {telematics}
-    Heuristic candidates: {candidates}
-    Maintenance history: {history_summary}
-
-    Improve confidence, validate issues, and choose one top predicted failure.
-
-    Return strictly JSON:
-    {{
-      "refined_candidates": [...],
-      "top_prediction": {{
-         "predicted_failure": "...",
-         "component": "...",
-         "confidence": 0-1,
-         "urgency": "low/medium/high",
-         "recommended_action": "..."
-      }}
-    }}
+    query = f"""
+    Vehicle Condition:
+    - Engine Temp Status: {tele.get('engine_temp_status')}
+    - Brake Pad Wear: {tele.get('brake_pad_wear_pct')}
+    - Battery Health: {tele.get('battery_health_pct')}
+    - Rule Alerts: {rule_summary}
+    - DTC Codes: {tele.get('dtc_code_list')}
     """
 
-    try:
-        resp = llm.invoke(prompt)
-        text = resp.content if hasattr(resp, "content") else str(resp)
-        return json.loads(text)
+    vs = get_vectorstore()
+    docs = vs.similarity_search(query, k=3)
+    return [d.page_content for d in docs]
 
-    except Exception as e:
-        print("[LLM ERROR - FALLBACK USED]", e)
 
-        # fallback logic
-        for c in candidates:
-            c["confidence"] = _map_confidence_with_history(c["base_confidence"], history_summary)
+# ---------- MAIN DIAGNOSIS PIPELINE ----------
+def diagnose_vehicle(vehicle_id: str):
+    profile = load_vehicle_profile(vehicle_id)
+    tele = load_telematics(vehicle_id)
+    history = load_maintenance_history(vehicle_id)
 
-        candidates_sorted = sorted(candidates, key=lambda x: x["confidence"], reverse=True)
-
-        top = candidates_sorted[0] if candidates_sorted else None
-
-        if top:
-            top_conf = top["confidence"]
-            top["urgency"] = _urgency_from_conf(top_conf)
-            top["recommended_action"] = (
-                "Recommend inspection within 48 hours"
-                if top["urgency"] != "low"
-                else "Monitor and schedule routine service"
-            )
-
+    if not profile.get("exists") or not tele.get("exists"):
         return {
-            "refined_candidates": candidates,
-            "top_prediction": top
+            "vehicle_id": vehicle_id,
+            "error": "Vehicle profile or telematics not found."
         }
 
+    rule_alerts = rule_based_signals(tele)
+    capa_docs = capa_similarity(tele, rule_alerts)
 
+    # -------------------------------------------------------
+    # ⭐ Compute most-likely predicted failure for CustomerAgent
+    # -------------------------------------------------------
+    if len(rule_alerts) > 0:
+        top_alert = rule_alerts[0]    # priority 1: engine > brakes > battery
+        predicted_failure = {
+            "predicted_failure": top_alert["issue"],
+            "urgency": top_alert["severity"],
+            "component": top_alert["component"]
+        }
+    else:
+        # fallback: low-risk general report
+        predicted_failure = {
+            "predicted_failure": "general_inspection_needed",
+            "urgency": "low",
+            "component": "vehicle"
+        }
 
-# --------------------------------------------------
-#   MAIN DIAGNOSIS PIPELINE
-# --------------------------------------------------
+    # -------------------------------------------------------
+    # Prepare summary text for debugging/logs
+    # -------------------------------------------------------
+    diagnosis_text = (
+        f"Vehicle {vehicle_id} shows {len(rule_alerts)} preliminary alerts.\n"
+        f"Telemetry analysis: Engine temp status = {tele.get('engine_temp_status')}.\n"
+        f"Based on CAPA/RCA patterns, potential failure causes match: {capa_docs[:2]}.\n"
+    )
 
-def diagnose_vehicle(vehicle_id: str) -> Dict:
-
-    # --- Load data via tools ---
-    telematics = get_telematics_snapshot_tool.run(vehicle_id)
-    profile = get_vehicle_profile_tool.run(vehicle_id)
-    history_summary = get_maintenance_history_tool.run(vehicle_id)
-
-    # --- Step 1: Rule-based heuristics ---
-    candidates = _simple_rule_predict(telematics)
-
-    # --- Step 2: RCA/CAPA context (vectorstore search) ---
-    vs = get_vectorstore()
-    query = f"vehicle {vehicle_id}, telematics={telematics}, profile={profile}, history={history_summary}"
-    rca_hits = vs.similarity_search(query, k=3)
-    rca_info = [{"content": h.page_content, "metadata": h.metadata} for h in rca_hits]
-
-    # Add RCA evidence boosts
-    dtcs = telematics.get("dtc_code_list", [])
-    for c in candidates:
-        for hit in rca_info:
-            r_related = hit["metadata"].get("related_dtc_codes", [])
-            if any(d in r_related for d in dtcs):
-                c["base_confidence"] = min(1.0, c["base_confidence"] + 0.12)
-
-    # --- Step 3: LLM refine (non-blocking) ---
-    llm_result = _llm_refine_predictions(vehicle_id, telematics, candidates, history_summary)
-
-    top = llm_result.get("top_prediction")
-    refined = llm_result.get("refined_candidates", candidates)
-
-    # --- Return final structured response ---
+    # -------------------------------------------------------
+    # ⭐ FINAL OUTPUT (now compatible with CustomerAgent)
+    # -------------------------------------------------------
     return {
         "vehicle_id": vehicle_id,
-        "predicted_failure": top,
-        "candidates": refined,
-        "rca_evidence": rca_info,
-        "telematics": telematics,
-        "vehicle_profile": profile
+        "rule_alerts": rule_alerts,
+        "capa_matches": capa_docs,
+        "predicted_failure": predicted_failure,   # ⭐ ADDED BLOCK
+        "diagnosis_summary": diagnosis_text
     }

@@ -1,7 +1,9 @@
 # agent_logic.py
 
-from langchain_openai import ChatOpenAI
-from langchain.agents import initialize_agent, AgentType
+import json
+import os
+from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+
 from .tools import (
     get_vehicle_profile_tool,
     get_past_feedback_tool,
@@ -9,76 +11,84 @@ from .tools import (
 )
 from .sentiment_rules import rule_sentiment
 
-import json
 
+# -------------------------------
+# Load HuggingFace OFFLINE model
+# -------------------------------
+MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"   # Example model, change if needed
 
-def build_feedback_agent():
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.2
-    )
+print("Loading offline HuggingFace model locally...")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=True)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_NAME,
+    device_map="auto",
+    torch_dtype="auto",
+    local_files_only=True
+)
 
-    tools = [
-        get_vehicle_profile_tool,
-        get_past_feedback_tool,
-        store_feedback_tool
-    ]
-
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.OPENAI_FUNCTIONS,
-        verbose=False
-    )
-
-    return agent
+generator = pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    max_new_tokens=300
+)
 
 
 def analyze_feedback(vehicle_id: str, feedback_text: str):
-    agent = build_feedback_agent()
-
-    # Step 1: Rule-based interpretation
-    sentiment, complaint_flag = rule_sentiment(feedback_text)
-
-    # Step 2: LLM deeper analysis
-    prompt = f"""
-    The customer provided feedback: "{feedback_text}"
-    Vehicle ID: {vehicle_id}
-
-    Based on this feedback:
-    - Extract service_rating (1 to 5)
-    - Determine overall sentiment (positive/neutral/negative)
-    - Identify any issues reported
-    - Check if issues are recurring
-    - Recommend followup action
-
-    Return only JSON like:
-    {{
-       "vehicle_id": "...",
-       "sentiment": "...",
-       "service_rating": ...,
-       "issues_reported": [...],
-       "is_recurring": true/false,
-       "recommended_followup_action": "..."
-    }}
+    """
+    Processes customer feedback fully OFFLINE using a local HuggingFace model.
     """
 
-    llm_raw = agent.run(prompt)
+    # 1. Rule-based sentiment
+    sentiment, complaint_flag = rule_sentiment(feedback_text)
 
-    # Step 3: Parse LLM JSON
+    # 2. Prepare offline prompt
+    prompt = f"""
+You are an expert JSON extractor.
+Read customer feedback and return ONLY a JSON object.
+
+Feedback: "{feedback_text}"
+Vehicle ID: {vehicle_id}
+
+Return EXACT JSON:
+{{
+  "vehicle_id": "{vehicle_id}",
+  "sentiment": "positive/neutral/negative",
+  "service_rating": 1-5,
+  "issues_reported": ["..."],
+  "is_recurring": true/false,
+  "recommended_followup_action": "..."
+}}
+"""
+
+    # 3. Run offline LLM
+    output = generator(prompt)[0]["generated_text"]
+
+    # Extract the JSON part only
+    json_start = output.find("{")
+    json_end = output.rfind("}")
+
+    if json_start != -1 and json_end != -1:
+        llm_raw = output[json_start:json_end+1]
+    else:
+        llm_raw = ""
+
+    # 4. Parse JSON
     try:
         structured = json.loads(llm_raw)
     except:
+        # Fallback
         structured = {
             "vehicle_id": vehicle_id,
             "sentiment": sentiment,
-            "issues_reported": [],
             "service_rating": 3,
+            "issues_reported": [],
             "is_recurring": complaint_flag,
-            "recommended_followup_action": "Suggest service recheck" if complaint_flag else "None"
+            "recommended_followup_action":
+                "Suggest service recheck" if complaint_flag else "None"
         }
 
-    # Step 4: Store feedback record
+    # 5. Store it using your @tool
     store_feedback_tool.run(json.dumps(structured))
 
     return structured

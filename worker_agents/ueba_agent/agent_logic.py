@@ -10,8 +10,8 @@ from sklearn.ensemble import IsolationForest
 import numpy as np
 from dateutil.parser import isoparse
 
-from tools import read_activity_logs, append_alert
-from rules import (
+from .tools import read_activity_logs, append_alert
+from .rules import (
     is_unauthorized_access,
     rate_spike,
     high_error_rate,

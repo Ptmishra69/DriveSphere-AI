@@ -2,8 +2,8 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Any, Dict
-from tools import append_activity_log, read_activity_logs, read_alerts
-from agent_logic import scan_and_detect
+from .tools import append_activity_log, read_activity_logs, read_alerts
+from .agent_logic import scan_and_detect
 
 app = FastAPI(title="UEBA Agent", version="1.0.0")
 
