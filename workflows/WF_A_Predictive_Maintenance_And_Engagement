@@ -1,0 +1,580 @@
+{
+  "name": "WF_A_Predictive_Maintenance_And_Engagement",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/telematics-event",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ae6d374a-b550-47fa-aacc-b11024497178",
+      "name": "Webhook",
+      "webhookId": "8b89c8fe-76d0-43c7-b77d-ad3d253252b0"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dataanalysis.devhol.surf/analyze",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "vehicle_id",
+              "value": "={{ $json.body.vehicle_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        192,
+        0
+      ],
+      "id": "360404df-cc6f-42c5-a385-b86bc4a1a094",
+      "name": "DataAnalysisAgent"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "750a5be3-7c3c-437d-9f3c-f43ce20ee143",
+              "leftValue": "={{ $node[\"DataAnalysisAgent\"].json[\"alerts\"].length > 0 }}\n",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        0
+      ],
+      "id": "29cb5eba-2fd6-4a8e-8e9c-d40c88299534",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://diagnose.devhol.surf/diagnose",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"vehicle_id\": \"{{ $node['DataAnalysisAgent'].json['vehicle_id'] }}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        816,
+        -96
+      ],
+      "id": "92aedc58-846e-4808-9eac-241e32df4c2a",
+      "name": "DiagnosisAgent"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fff312e9-81e5-4d87-b673-e0fb669b61ea",
+              "leftValue": "={{ [\"high\", \"medium\"].includes($node[\"DiagnosisAgent\"].json.predicted_failure?.urgency) }}\n",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1232,
+        -96
+      ],
+      "id": "fe0f51dd-4944-4b03-8dd5-d0e29e586894",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ueba.devhol.surf/ingest",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"timestamp\": \"{{ new Date().toISOString() }}\",\n  \"agent_name\": \"DiagnosisAgent\",\n  \"agent_id\": \"diagnosis_01\",\n  \"action\": \"call_api\",\n  \"endpoint\": \"/diagnose\",\n  \"target_resource\": \"diagnosis_agent\",\n  \"status_code\": \"{{ $json['statusCode'] || 200 }}\",\n  \"payload_size\": \"{{ JSON.stringify($node['DiagnosisAgent'].json).length }}\",\n  \"latency_ms\": 120,\n  \"extra\": {\n    \"vehicle_id\": \"{{ $node['DiagnosisAgent'].json['vehicle_id'] }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1024,
+        -96
+      ],
+      "id": "a9efcf1f-fc63-4723-be3d-005593970d53",
+      "name": "UEBAIngestDiagnose"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ueba.devhol.surf/ingest",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"timestamp\": \"{{ new Date().toISOString() }}\",\n  \"agent_name\": \"DataAnalysisAgent\",\n  \"agent_id\": \"data_analysis_01\",\n  \"action\": \"call_api\",\n  \"endpoint\": \"/analyze\",\n  \"target_resource\": \"telematics_api\",\n  \"status_code\": \"{{ $('DataAnalysisAgent').item.json.statusCode || 200 }}\",\n  \"payload_size\": \"{{ JSON.stringify($('Webhook').item.json).length }}\",\n  \"latency_ms\": 120,\n  \"extra\": {\n    \"vehicle_id\": \"{{ $json.raw_telematics.vehicle_id }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        400,
+        0
+      ],
+      "id": "168eb0d1-7147-4c7d-a44b-6c4a812b19aa",
+      "name": "UEBAIngestDataAnalysis"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://customerengagement.devhol.surf/engage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "vehicle_id",
+              "value": "={{ $node[\"DiagnosisAgent\"].json[\"vehicle_id\"] }}"
+            },
+            {
+              "name": "diagnosis",
+              "value": "={{ $node[\"DiagnosisAgent\"].json\n }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1424,
+        -208
+      ],
+      "id": "0b0c07f8-b670-45e2-9b4a-d5bd53d7d738",
+      "name": "CustomerEngagement"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ueba.devhol.surf/ingest",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"timestamp\": \"{{ new Date().toISOString() }}\",\n  \"agent_name\": \"CustomerengagementAgent\",\n  \"agent_id\": \"engagement-01\",\n  \"action\": \"call_api\",\n  \"endpoint\": \"/engage\",\n  \"target_resource\": \"Customer_engagement_agent\",\n  \"status_code\": \"{{ $json['statusCode'] || 200 }}\",\n  \"payload_size\": \"{{ JSON.stringify($node['CustomerEngagement'].json).length }}\",\n  \"latency_ms\": 120,\n  \"extra\": {\n    \"vehicle_id\": \"{{ $node['DiagnosisAgent'].json['vehicle_id'] }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1632,
+        -208
+      ],
+      "id": "a49f3437-5fc1-477f-945c-bb911cc6129f",
+      "name": "UEBAIngestEngage"
+    },
+    {
+      "parameters": {
+        "resource": "call",
+        "from": "+919140969284",
+        "to": "+919140969284",
+        "twiml": true,
+        "message": "=<Response>   <Say>{{ $node[\"CustomerEngagement\"].json[\"voice_script\"] }}</Say> </Response>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        -224
+      ],
+      "id": "f2187752-a514-4189-9070-018f750845f6",
+      "name": "Make a call",
+      "credentials": {
+        "twilioApi": {
+          "id": "rkkV9zhKVJgzhhrf",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "from": "+14155238886",
+        "to": "+919140969284",
+        "toWhatsapp": true,
+        "message": "={   \"messaging_product\": \"whatsapp\",   \"to\": \"{{ $json.phone }}\",   \"type\": \"text\",   \"text\": {      \"body\": \"{{ $node['CustomerEngagement'].json['full_message'] }}\"   } }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        -224
+      ],
+      "id": "1dac8023-88c6-4f6d-a5ed-a99aa7be6a0e",
+      "name": "Send an SMS/MMS/WhatsApp message",
+      "credentials": {
+        "twilioApi": {
+          "id": "rkkV9zhKVJgzhhrf",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "from": "+14155238886",
+        "to": "+9140969284",
+        "toWhatsapp": true,
+        "message": "={   \"messaging_product\": \"whatsapp\",   \"to\": \"+919140969284\",   \"type\": \"text\",   \"text\": {      \"body\": \"{{ $node['CustomerEngagement'].json['short_push_notification'] }}\"   } }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        2320,
+        -112
+      ],
+      "id": "526ec745-c79d-430a-b5ce-7c84b0863691",
+      "name": "Send an SMS/MMS/WhatsApp message1",
+      "alwaysOutputData": false,
+      "credentials": {
+        "twilioApi": {
+          "id": "rkkV9zhKVJgzhhrf",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "23732103-c941-4400-a2aa-d862b4beb0f9",
+              "leftValue": "={{ $node[\"DiagnosisAgent\"].json[\"predicted_failure\"][\"urgency\"] }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1840,
+        -208
+      ],
+      "id": "1c660d88-25dc-4bcb-b065-4d53579feb8e",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fc375c62-5265-46fa-8dd4-dce5303151e8",
+              "leftValue": "={{ $node[\"DiagnosisAgent\"].json[\"predicted_failure\"][\"urgency\"] }}",
+              "rightValue": "medium",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2096,
+        -64
+      ],
+      "id": "667dedb2-d96b-428f-99f7-0924c633fe98",
+      "name": "If3"
+    },
+    {
+      "parameters": {
+        "from": "+14155238886",
+        "to": "+919140969284",
+        "message": "={   \"messaging_product\": \"whatsapp\",   \"to\": \"+919140969284\",   \"type\": \"text\",   \"text\": {      \"body\": \"{{ $node['CustomerEngagement'].json['short_push_notification'] }}\"   } }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        2304,
+        32
+      ],
+      "id": "1e5776d9-6747-4d42-b0bb-c6fc410efe95",
+      "name": "Send an SMS/MMS/WhatsApp message2",
+      "credentials": {
+        "twilioApi": {
+          "id": "rkkV9zhKVJgzhhrf",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combineBySql",
+        "numberInputs": 3,
+        "query": "SELECT * FROM input1\nUNION ALL\nSELECT * FROM input2\nUNION ALL\nSELECT * FROM input3\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2528,
+        -144
+      ],
+      "id": "5f0967a3-ca05-49af-a1c3-52209adb5c82",
+      "name": "Merge",
+      "alwaysOutputData": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "DataAnalysisAgent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DataAnalysisAgent": {
+      "main": [
+        [
+          {
+            "node": "UEBAIngestDataAnalysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "DiagnosisAgent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DiagnosisAgent": {
+      "main": [
+        [
+          {
+            "node": "UEBAIngestDiagnose",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "CustomerEngagement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UEBAIngestDiagnose": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UEBAIngestDataAnalysis": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CustomerEngagement": {
+      "main": [
+        [
+          {
+            "node": "UEBAIngestEngage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UEBAIngestEngage": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make a call": {
+      "main": [
+        [
+          {
+            "node": "Send an SMS/MMS/WhatsApp message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Make a call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [
+          {
+            "node": "Send an SMS/MMS/WhatsApp message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send an SMS/MMS/WhatsApp message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send an SMS/MMS/WhatsApp message1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Send an SMS/MMS/WhatsApp message": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send an SMS/MMS/WhatsApp message2": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "596afa76-ac8d-4816-9104-09a45e19c9a0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1c9074e2c608c9619ac66526598155a8fbd619a3a452d5e624545f6298056731"
+  },
+  "id": "JQ0dF2jNeP3E8Z26",
+  "tags": []
+}
