@@ -1,0 +1,262 @@
+{
+  "name": "WF-B Post-Service Feedback & Manufacturing Loop",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/service-completed",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "05c147d8-e89d-430b-9f7f-18cdc79e80b1",
+      "name": "Webhook",
+      "webhookId": "6653e409-f2f4-4495-84b4-935be59e596f"
+    },
+    {
+      "parameters": {
+        "url": "https://feed.devhol.surf/feedback.json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        704,
+        96
+      ],
+      "id": "7442870d-86f7-486b-8432-e94cb3ed18f5",
+      "name": "Feedback Input"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://feedback.devhol.surf/feedback",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n\"vehicle_id\": \"={{$json.vehicle_id}}\",\n\"feedback_text\": \"={{$json.feedback_text}}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        912,
+        96
+      ],
+      "id": "cfe38fcb-ded8-4b53-8cc4-5281231d2fe3",
+      "name": "FeedbackaAgent"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rca.devhol.surf/rca",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"vehicle_id\": $(\"Webhook\").item.json.body.vehicle_id, \"service_event\": $(\"service-event\").item.json.service_event, \"feedback_analysis\": $json.feedback_analysis } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1328,
+        96
+      ],
+      "id": "61d44e78-0c11-419f-ada2-81714b936889",
+      "name": "RCAAgent"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  return {\n    json: {\n      feedback_analysis: item.json\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        96
+      ],
+      "id": "674481f5-0575-4445-b5ac-0032d0c0377e",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6dad857f-bee7-4889-a75f-c5089b4c1c97",
+              "leftValue": "={{ $json.should_notify_manufacturing }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": "=",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1536,
+        96
+      ],
+      "id": "6bc1003a-0426-48b8-9352-a78aa8d46495",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1744,
+        0
+      ],
+      "id": "ba5579af-7c0c-4200-96d7-bb937a98f85e",
+      "name": "Manufacturing - System - Update",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  return {\n    json: {\n      service_event: item.json\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "72a3da75-12ac-4c89-96ba-d01e60b20e19",
+      "name": "service-event"
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        416,
+        0
+      ],
+      "id": "93c3f9c9-231d-4720-b15b-d8150ea62afc",
+      "name": " wait for Feedback",
+      "webhookId": "5adfb8d7-266e-4d06-ba6e-7340cd58504b"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "service-event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Feedback Input": {
+      "main": [
+        [
+          {
+            "node": "FeedbackaAgent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FeedbackaAgent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RCAAgent": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "RCAAgent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Manufacturing - System - Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "service-event": {
+      "main": [
+        [
+          {
+            "node": " wait for Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    " wait for Feedback": {
+      "main": [
+        [
+          {
+            "node": "Feedback Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7335d40d-053f-4b8f-8c52-45e04603e662",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1c9074e2c608c9619ac66526598155a8fbd619a3a452d5e624545f6298056731"
+  },
+  "id": "9l8uT7Ih6oD6C69I",
+  "tags": []
+}
