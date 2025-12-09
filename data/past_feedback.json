@@ -1,0 +1,10 @@
+{
+  "=VHC001": {
+    "vehicle_id": "=VHC001",
+    "sentiment": "positive",
+    "service_rating": 5,
+    "issues_reported": [],
+    "is_recurring": false,
+    "recommended_followup_action": "None"
+  }
+}

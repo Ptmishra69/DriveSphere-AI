@@ -1,19 +1,20 @@
-# agent_logic.py  (HuggingFace / transformers version – FREE)
-
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-from .tools import (
-    get_vehicle_profile_tool,
-    get_service_center_slots_tool
-)
-from .slot_rules import prioritize_slots
 import json
+import os
+
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import torch
 
+from .tools import (
+    load_vehicle_profile,
+    load_service_center_slots
+)
 
-# ------------------------------------------------------------
-# Load HF Model (cached on first load, shared across requests)
-# ------------------------------------------------------------
+from .slot_rules import prioritize_slots
 
+
+# -------------------------------
+# Load HuggingFace offline model
+# -------------------------------
 MODEL_NAME = "google/flan-t5-base"
 
 _tokenizer = None
@@ -28,116 +29,81 @@ def load_llm():
     return _tokenizer, _model
 
 
-# ------------------------------------------------------------
-# Helper: run HuggingFace LLM
-# ------------------------------------------------------------
-
-def llm_generate(prompt: str, max_tokens: int = 256):
+def run_llm(prompt: str, max_length=256):
     tokenizer, model = load_llm()
 
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True)
+
     with torch.no_grad():
         output = model.generate(
             **inputs,
-            max_length=max_tokens,
+            max_length=max_length,
             do_sample=True,
-            top_p=0.9,
-            temperature=0.4
+            temperature=0.4,
+            top_p=0.9
         )
 
-    text = tokenizer.decode(output[0], skip_special_tokens=True)
-    return text
+    return tokenizer.decode(output[0], skip_special_tokens=True)
 
 
-# ------------------------------------------------------------
-# Main scheduling logic (LLM + rules)
-# ------------------------------------------------------------
-
+# -------------------------------
+# Main scheduling logic
+# -------------------------------
 def schedule_appointment(vehicle_id: str, diagnosis: dict, customer_pref: dict = None):
 
-    # ---------------------------------------------
-    # Load vehicle profile (location / city)
-    # ---------------------------------------------
-    profile = get_vehicle_profile_tool.run(vehicle_id)
-    city = profile.get("city", "Unknown City")
-    model_name = profile.get("model", "vehicle")
     urgency = diagnosis["predicted_failure"]["urgency"]
 
-    # ---------------------------------------------
-    # Load all service center slots for this city
-    # ---------------------------------------------
-    centers = get_service_center_slots_tool.run(city)
+    # Load offline data
+    profile = load_vehicle_profile(vehicle_id)
+    city = profile.get("city", "")
+
+    centers = load_service_center_slots(city)
 
     if not centers:
         return {
             "status": "no_slots_available",
-            "message": f"No service centers found for city: {city}"
+            "message": f"No service centers found for {city}."
         }
 
-    # ---------------------------------------------
-    # Rule-based prioritization (deterministic)
-    # ---------------------------------------------
-    recommended_slots = prioritize_slots(centers, urgency)
-
-    if not recommended_slots:
-        return {
-            "status": "no_recommended_slots",
-            "message": f"No suitable slots found for {city}"
-        }
-
-    # ---------------------------------------------
-    # Prepare structured info for LLM refinement
-    # ---------------------------------------------
-    best_slot = recommended_slots[0]
-    alt_slots = recommended_slots[1:3]
+    recommended = prioritize_slots(centers, urgency)
 
     base_info = {
-        "model": model_name,
+        "vehicle_id": vehicle_id,
+        "model": profile.get("model"),
         "city": city,
         "urgency": urgency,
-        "best_slot": best_slot,
-        "alternate_slots": alt_slots,
-        "customer_pref": customer_pref,
+        "recommended_slots": recommended,
+        "customer_preference": customer_pref,
     }
 
-    # ---------------------------------------------
-    # Prompt for LLM refinement (FREE HF model)
-    # ---------------------------------------------
     prompt = f"""
-You are a smart scheduling assistant for a motorcycle service brand.
+Convert the following data into a JSON response:
 
-Convert this scheduling data into natural language:
-
-DATA:
 {json.dumps(base_info, indent=2)}
 
-Return the result in JSON with these fields:
+Output JSON fields:
 - best_slot
 - alternate_slots
 - customer_friendly_text
 - voice_script
-    """
 
-    llm_output = llm_generate(prompt)
+Return ONLY JSON.
+"""
 
-    # ---------------------------------------------------------
-    # HF models like T5 may not return clean JSON → fix fallback
-    # ---------------------------------------------------------
+    raw = run_llm(prompt)
+
+    # try to load JSON
     try:
-        result = json.loads(llm_output)
-    except Exception:
-        # simple fallback if JSON fails:
-        result = {
-            "best_slot": best_slot["slot"],
-            "alternate_slots": [s["slot"] for s in alt_slots],
+        return json.loads(raw)
+    except:
+        best = recommended[0]
+        return {
+            "best_slot": best["slot"],
+            "alternate_slots": [s["slot"] for s in recommended[1:3]],
             "customer_friendly_text": (
-                f"Based on the issue urgency, the best available service "
-                f"appointment is {best_slot['slot']} at {best_slot['location']}."
+                f"The best slot is {best['slot']} at {best['location']}."
             ),
             "voice_script": (
-                f"I recommend booking your appointment on {best_slot['slot']} "
-                f"at {best_slot['location']} for your {model_name}."
+                f"I recommend booking {best['slot']} at {best['location']}."
             )
         }
-
-    return result

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from agent_logic import generate_engagement
+from .agent_logic import generate_engagement
 
 app = FastAPI(
     title="Customer Engagement Agent (UEBA-powered)",

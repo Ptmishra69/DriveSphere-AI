@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Vehicle Feedback</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 p-6">
+
+  <div class="max-w-xl mx-auto bg-white p-6 rounded-xl shadow-lg">
+
+    <h2 class="text-2xl font-bold mb-4 text-center">🛠 Vehicle Service Feedback</h2>
+
+    <!-- Vehicle ID -->
+    <label class="font-semibold">Vehicle ID</label>
+    <input id="vehicleId"
+           value="VHC001"
+           class="w-full p-2 border rounded mb-4 bg-gray-100">
+
+    <!-- Text Feedback -->
+    <label class="font-semibold">Text Feedback</label>
+    <textarea id="textFeedback"
+              placeholder="Type your feedback..."
+              class="w-full p-2 border rounded mb-4 h-24"></textarea>
+
+    <!-- Voice Recording -->
+    <label class="font-semibold">Voice Feedback (Offline)</label>
+
+    <button id="recordBtn"
+            class="w-full bg-purple-600 hover:bg-purple-700 text-white p-2 rounded mb-2">
+      🎤 Start Recording
+    </button>
+
+    <p id="recordStatus" class="text-sm text-gray-600 mb-4"></p>
+
+    <textarea id="speechText"
+              placeholder="Voice transcription will appear here..."
+              class="w-full p-2 border rounded h-24 mb-4"></textarea>
+
+    <!-- Submit -->
+    <button id="submitBtn"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white p-3 rounded font-semibold">
+      Submit Feedback
+    </button>
+
+    <p id="statusMsg" class="text-lg font-semibold mt-4 text-center"></p>
+  </div>
+
+<script>
+let isRecording = false;
+let mediaRecorder;
+let audioChunks = [];
+
+const recordBtn = document.getElementById("recordBtn");
+const recordStatus = document.getElementById("recordStatus");
+
+recordBtn.onclick = async () => {
+  if (!isRecording) startRecording();
+  else stopRecording();
+};
+
+async function startRecording() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  mediaRecorder = new MediaRecorder(stream);
+  audioChunks = [];
+
+  mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+  mediaRecorder.onstop = () => {
+    // OFFLINE STT SIMULATION
+    const fakeText = [
+      "Engine noise still present.",
+      "Brakes feel loose.",
+      "Service was good overall.",
+      "Bike feels smoother now.",
+      "Not satisfied with cleaning."
+    ];
+
+    document.getElementById("speechText").value =
+      fakeText[Math.floor(Math.random() * fakeText.length)];
+
+    recordStatus.textContent = "Voice processed (offline simulation).";
+  };
+
+  isRecording = true;
+  mediaRecorder.start();
+
+  recordBtn.textContent = "⏹ Stop Recording";
+  recordBtn.classList.add("bg-red-600");
+  recordStatus.textContent = "Recording...";
+}
+
+function stopRecording() {
+  isRecording = false;
+  mediaRecorder.stop();
+
+  recordBtn.textContent = "🎤 Start Recording";
+  recordBtn.classList.remove("bg-red-600");
+  recordStatus.textContent = "Processing...";
+}
+
+// ENTER submits feedback
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    submitFeedback();
+  }
+});
+
+document.getElementById("submitBtn").onclick = submitFeedback;
+
+async function submitFeedback() {
+  // NEW: send feedback to local mini-server
+  const webhookUrl = "http://127.0.0.1:3005/save-feedback";
+
+  const payload = {
+    vehicle_id: document.getElementById("vehicleId").value,
+    feedback_text:
+      document.getElementById("textFeedback").value + " " +
+      document.getElementById("speechText").value
+  };
+
+  const submitBtn = document.getElementById("submitBtn");
+  const statusMsg = document.getElementById("statusMsg");
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Submitting...";
+  submitBtn.classList.remove("bg-blue-600", "hover:bg-blue-700");
+  submitBtn.classList.add("bg-gray-500");
+
+  try {
+    const resp = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (resp.status === 200) {
+      statusMsg.textContent = "✔ Feedback Saved Locally!";
+      statusMsg.classList.add("text-green-600");
+      submitBtn.textContent = "Submitted ✔";
+    } else {
+      statusMsg.textContent = "❌ Error Sending Feedback";
+      statusMsg.classList.add("text-red-600");
+      submitBtn.textContent = "Error ❌";
+    }
+
+  } catch (e) {
+    statusMsg.textContent = "❌ Network Error";
+    statusMsg.classList.add("text-red-600");
+    submitBtn.textContent = "Error ❌";
+  }
+}
+</script>
+
+</body>
+</html>

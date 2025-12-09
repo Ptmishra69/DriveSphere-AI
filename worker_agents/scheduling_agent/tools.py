@@ -1,31 +1,28 @@
-# tools.py
-
 import json
 import os
-from shared.shared_loader import load_vehicle_profile
+from shared.shared_loader import load_vehicle_profile as _load_vehicle_profile
 
 SLOTS_FILE = "../data/service_center_slots.json"
 
 
-def get_vehicle_profile_tool(vehicle_id: str):
-    """Return vehicle profile."""
-    return load_vehicle_profile(vehicle_id)
+def load_vehicle_profile(vehicle_id: str):
+    """Offline loader for vehicle profile."""
+    return _load_vehicle_profile(vehicle_id)
 
 
-def get_service_center_slots_tool(city: str):
-    """Return service centers in the city."""
+def load_service_center_slots(city: str):
+    """Load service center slots from local JSON file."""
     if not os.path.exists(SLOTS_FILE):
         return {}
 
     with open(SLOTS_FILE, "r") as f:
         slots = json.load(f)
 
-    city_lower = city.lower()
-
-    # match using "location" field
+    # Case-insensitive filter
     city_centers = {
-        name: info for name, info in slots.items()
-        if city_lower in info["location"].lower()
+        name: info
+        for name, info in slots.items()
+        if city.lower() in info["location"].lower()
     }
 
     return city_centers

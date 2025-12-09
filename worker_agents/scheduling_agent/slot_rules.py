@@ -1,28 +1,27 @@
-# slot_rules.py
-
 from datetime import datetime, timedelta
 
 def prioritize_slots(centers: dict, urgency: str):
-    prioritized = []
+    """
+    Sort slots depending on urgency level.
+    """
+    slots = []
 
-    for name, info in centers.items():
+    for center_name, info in centers.items():
         for slot in info["slots"]:
             dt = datetime.strptime(slot, "%Y-%m-%d %H:%M")
-
-            prioritized.append({
-                "center": name,
+            slots.append({
+                "center": center_name,
                 "location": info["location"],
                 "slot": slot,
                 "datetime": dt
             })
 
-    prioritized.sort(key=lambda x: x["datetime"])
+    slots.sort(key=lambda x: x["datetime"])
 
     if urgency == "high":
-        return prioritized[:2]
-
+        return slots[:2]
     elif urgency == "medium":
         cutoff = datetime.now() + timedelta(days=3)
-        return [s for s in prioritized if s["datetime"] < cutoff][:3]
-
-    return prioritized[:3]
+        return [s for s in slots if s["datetime"] < cutoff][:3]
+    else:
+        return slots[:3]

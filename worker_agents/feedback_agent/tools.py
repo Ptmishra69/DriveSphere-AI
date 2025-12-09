@@ -1,93 +1,53 @@
-# agent_logic.py
+import os, json
+from langchain.tools import tool
+from shared.shared_loader import load_vehicle_profile
 
-import json
-import os
-from dotenv import load_dotenv
-
-from langchain_groq import ChatGroq
-from langchain.schema import SystemMessage, HumanMessage
-
-# Tools (already decorated with @tool)
-from .tools import (
-    get_vehicle_profile_tool,
-    get_past_feedback_tool,
-    store_feedback_tool
-)
-
-from .sentiment_rules import rule_sentiment
-
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PAST_FEEDBACK_FILE = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "data", "past_feedback.json"))
 
 
-def analyze_feedback(vehicle_id: str, feedback_text: str):
-    """
-    Processes customer feedback using:
-    - Rule-based analysis
-    - LLM JSON extraction
-    - Tool-based storage
-    """
+@tool("get_vehicle_profile")
+def get_vehicle_profile_tool(vehicle_id: str):
+    """Returns vehicle profile dictionary."""
+    return load_vehicle_profile(vehicle_id)
 
-    # 1. Rule-based sentiment
-    sentiment, complaint_flag = rule_sentiment(feedback_text)
 
-    # 2. Build Groq LLM
-    llm = ChatGroq(
-        model="llama3-70b-8192",
-        groq_api_key=os.getenv("GROQ_API_KEY"),
-        temperature=0.2,
-    )
-
-    prompt = f"""
-    A customer submitted feedback:
-
-    "{feedback_text}"
-
-    Vehicle ID: {vehicle_id}
-
-    Extract structured info:
-    - service_rating (1-5)
-    - sentiment (positive/neutral/negative)
-    - issues_reported (list of strings)
-    - is_recurring (true/false)
-    - recommended_followup_action
-
-    Return ONLY valid JSON:
-    {{
-        "vehicle_id": "{vehicle_id}",
-        "sentiment": "...",
-        "service_rating": 1-5,
-        "issues_reported": ["..."],
-        "is_recurring": true/false,
-        "recommended_followup_action": "..."
-    }}
-    """
+@tool("get_past_feedback")
+def get_past_feedback_tool(vehicle_id: str):
+    """Returns past stored feedback (offline JSON)."""
+    if not os.path.exists(PAST_FEEDBACK_FILE):
+        return {}
 
     try:
-        response = llm.invoke([
-            SystemMessage(content="You are an expert JSON extractor."),
-            HumanMessage(content=prompt)
-        ])
-        llm_raw = response.content
-    except Exception as e:
-        print("LLM ERROR:", e)
-        llm_raw = ""
-
-    # 3. Try JSON parsing
-    try:
-        structured = json.loads(llm_raw)
+        with open(PAST_FEEDBACK_FILE, "r") as f:
+            data = json.load(f)
     except:
-        structured = {
-            "vehicle_id": vehicle_id,
-            "sentiment": sentiment,
-            "service_rating": 3,
-            "issues_reported": [],
-            "is_recurring": complaint_flag,
-            "recommended_followup_action": (
-                "Suggest service recheck" if complaint_flag else "None"
-            )
-        }
+        return {}
 
-    # 4. Store feedback
-    store_feedback_tool.run(json.dumps(structured))
+    return data.get(vehicle_id, {})
 
-    return structured
+
+@tool("store_feedback")
+def store_feedback_tool(data: str):
+    """Stores processed feedback into disk."""
+    os.makedirs(os.path.dirname(PAST_FEEDBACK_FILE), exist_ok=True)
+
+    new = json.loads(data)
+
+    # Load old data
+    try:
+        if os.path.exists(PAST_FEEDBACK_FILE):
+            with open(PAST_FEEDBACK_FILE, "r") as f:
+                past = json.load(f)
+        else:
+            past = {}
+    except:
+        past = {}
+
+    past[new["vehicle_id"]] = new
+
+    # Save
+    with open(PAST_FEEDBACK_FILE, "w") as f:
+        json.dump(past, f, indent=2)
+
+    return {"status": "saved"}

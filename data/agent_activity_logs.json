@@ -408,5 +408,145 @@
     "extra": {
       "vehicle_id": "VHC009"
     }
+  },
+  {
+    "timestamp": "2025-12-08T11:17:39.056Z",
+    "agent_name": "DataAnalysisAgent",
+    "agent_id": "data_analysis_01",
+    "action": "call_api",
+    "endpoint": "/analyze",
+    "target_resource": "telematics_api",
+    "status_code": 200,
+    "payload_size": 1135,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC005"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T15:40:33.967Z",
+    "agent_name": "DataAnalysisAgent",
+    "agent_id": "data_analysis_01",
+    "action": "call_api",
+    "endpoint": "/analyze",
+    "target_resource": "telematics_api",
+    "status_code": 200,
+    "payload_size": 1135,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC007"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T16:02:00.987Z",
+    "agent_name": "DataAnalysisAgent",
+    "agent_id": "data_analysis_01",
+    "action": "call_api",
+    "endpoint": "/analyze",
+    "target_resource": "telematics_api",
+    "status_code": 200,
+    "payload_size": 1135,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC010"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T16:02:04.004Z",
+    "agent_name": "DiagnosisAgent",
+    "agent_id": "diagnosis_01",
+    "action": "call_api",
+    "endpoint": "/diagnose",
+    "target_resource": "diagnosis_agent",
+    "status_code": 200,
+    "payload_size": 1980,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC010"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T16:20:08.245Z",
+    "agent_name": "DataAnalysisAgent",
+    "agent_id": "data_analysis_01",
+    "action": "call_api",
+    "endpoint": "/analyze",
+    "target_resource": "telematics_api",
+    "status_code": 200,
+    "payload_size": 1134,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC005"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T16:20:10.839Z",
+    "agent_name": "DiagnosisAgent",
+    "agent_id": "diagnosis_01",
+    "action": "call_api",
+    "endpoint": "/diagnose",
+    "target_resource": "diagnosis_agent",
+    "status_code": 200,
+    "payload_size": 2032,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC005"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T16:20:12.860Z",
+    "agent_name": "CustomerengagementAgent",
+    "agent_id": "engagement-01",
+    "action": "call_api",
+    "endpoint": "/engage",
+    "target_resource": "Customer_engagement_agent",
+    "status_code": 200,
+    "payload_size": 72,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC005"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T20:28:54.587Z",
+    "agent_name": "DataAnalysisAgent",
+    "agent_id": "data_analysis_01",
+    "action": "call_api",
+    "endpoint": "/analyze",
+    "target_resource": "telematics_api",
+    "status_code": 200,
+    "payload_size": 1135,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC001"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T20:32:36.882Z",
+    "agent_name": "DiagnosisAgent",
+    "agent_id": "diagnosis_01",
+    "action": "call_api",
+    "endpoint": "/diagnose",
+    "target_resource": "diagnosis_agent",
+    "status_code": 200,
+    "payload_size": 2032,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC001"
+    }
+  },
+  {
+    "timestamp": "2025-12-08T20:33:12.976Z",
+    "agent_name": "CustomerengagementAgent",
+    "agent_id": "engagement-01",
+    "action": "call_api",
+    "endpoint": "/engage",
+    "target_resource": "Customer_engagement_agent",
+    "status_code": 200,
+    "payload_size": 72,
+    "latency_ms": 120,
+    "extra": {
+      "vehicle_id": "VHC001"
+    }
   }
 ]

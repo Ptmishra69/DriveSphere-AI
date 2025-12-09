@@ -6,21 +6,21 @@ from .agent_logic import generate_manufacturing_insights
 
 app = FastAPI(
     title="RCA/CAPA Agent",
-    description="Generates manufacturing improvement insights from diagnosis and feedback.",
-    version="1.0.0"
+    version="1.0.0",
+    description="Offline RCA agent without external dependencies"
 )
+
 
 class RCARequest(BaseModel):
     vehicle_id: str
-    diagnosis: dict
-    feedback: dict
+    service_event: dict
+    feedback_analysis: dict
 
 
 @app.post("/rca")
 def rca(req: RCARequest):
-    insights = generate_manufacturing_insights(
+    return generate_manufacturing_insights(
         req.vehicle_id,
-        req.diagnosis,
-        req.feedback
+        req.service_event,
+        req.feedback_analysis
     )
-    return insights

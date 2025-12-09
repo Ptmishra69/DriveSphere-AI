@@ -1,9 +1,5 @@
-# agent_logic.py
-
 import json
-import os
-from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
-
+import re
 from .tools import (
     get_vehicle_profile_tool,
     get_past_feedback_tool,
@@ -12,83 +8,71 @@ from .tools import (
 from .sentiment_rules import rule_sentiment
 
 
-# -------------------------------
-# Load HuggingFace OFFLINE model
-# -------------------------------
-MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"   # Example model, change if needed
+def extract_issues(feedback_text: str):
+    """Simple offline extraction using keyword scanning."""
+    issues = []
+    fb = feedback_text.lower()
 
-print("Loading offline HuggingFace model locally...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=True)
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    device_map="auto",
-    torch_dtype="auto",
-    local_files_only=True
-)
+    issue_keywords = [
+        "noise", "brake", "engine", "vibration", "oil", "problem",
+        "not working", "still", "scratch", "dirty", "leak"
+    ]
 
-generator = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer,
-    max_new_tokens=300
-)
+    for word in issue_keywords:
+        if word in fb:
+            issues.append(word)
+
+    return list(set(issues))
+
+
+def rate_service(sentiment: str, issues: list):
+    """Offline rating heuristic."""
+    if sentiment == "positive" and not issues:
+        return 5
+    if sentiment == "positive" and issues:
+        return 4
+    if sentiment == "neutral" and not issues:
+        return 3
+    if sentiment == "neutral" and issues:
+        return 2
+    if sentiment == "negative":
+        return 1
+    return 3
 
 
 def analyze_feedback(vehicle_id: str, feedback_text: str):
     """
-    Processes customer feedback fully OFFLINE using a local HuggingFace model.
+    100% OFFLINE FEEDBACK ANALYZER
+    - No LLM
+    - No HF model
+    - No langchain
     """
 
-    # 1. Rule-based sentiment
-    sentiment, complaint_flag = rule_sentiment(feedback_text)
+    # 1. sentiment analysis (offline)
+    sentiment, recurring = rule_sentiment(feedback_text)
 
-    # 2. Prepare offline prompt
-    prompt = f"""
-You are an expert JSON extractor.
-Read customer feedback and return ONLY a JSON object.
+    # 2. extract issue keywords
+    extracted = extract_issues(feedback_text)
 
-Feedback: "{feedback_text}"
-Vehicle ID: {vehicle_id}
+    # 3. compute rating
+    rating = rate_service(sentiment, extracted)
 
-Return EXACT JSON:
-{{
-  "vehicle_id": "{vehicle_id}",
-  "sentiment": "positive/neutral/negative",
-  "service_rating": 1-5,
-  "issues_reported": ["..."],
-  "is_recurring": true/false,
-  "recommended_followup_action": "..."
-}}
-"""
-
-    # 3. Run offline LLM
-    output = generator(prompt)[0]["generated_text"]
-
-    # Extract the JSON part only
-    json_start = output.find("{")
-    json_end = output.rfind("}")
-
-    if json_start != -1 and json_end != -1:
-        llm_raw = output[json_start:json_end+1]
+    # 4. determine action
+    if recurring or rating <= 2:
+        action = "Schedule a recheck"
     else:
-        llm_raw = ""
+        action = "None"
 
-    # 4. Parse JSON
-    try:
-        structured = json.loads(llm_raw)
-    except:
-        # Fallback
-        structured = {
-            "vehicle_id": vehicle_id,
-            "sentiment": sentiment,
-            "service_rating": 3,
-            "issues_reported": [],
-            "is_recurring": complaint_flag,
-            "recommended_followup_action":
-                "Suggest service recheck" if complaint_flag else "None"
-        }
+    structured = {
+        "vehicle_id": vehicle_id,
+        "sentiment": sentiment,
+        "service_rating": rating,
+        "issues_reported": extracted,
+        "is_recurring": recurring,
+        "recommended_followup_action": action
+    }
 
-    # 5. Store it using your @tool
-    store_feedback_tool.run(json.dumps(structured))
+    # 5. Save to file
+    store_feedback_tool(json.dumps(structured))
 
     return structured
