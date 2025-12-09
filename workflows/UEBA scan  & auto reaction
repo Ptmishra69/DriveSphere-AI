@@ -1,0 +1,170 @@
+{
+  "name": "UEBA scan  & auto reaction",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ueba.devhol.surf/scan",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"window_minutes\": 15\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        208,
+        0
+      ],
+      "id": "199b6e60-2c5a-4bd4-8227-2ce509976e11",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fb8be32a-f46a-4640-80b6-2389e9935998",
+              "leftValue": "={{ $json[\"alerts_count\"] }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "6aeebc47-6f3b-4033-85b4-21711ad220da",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": "="
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        688,
+        -64
+      ],
+      "id": "31b11f06-1a04-4630-9070-04cc95304ec9",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        912,
+        -16
+      ],
+      "id": "d7762645-9e11-4546-9771-d9b6bfe17079"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/telematics-event",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "fcf718c2-00e6-43e0-ae1b-c0422d220033",
+      "name": "Webhook",
+      "webhookId": "40bc776d-9bbf-48e6-aba9-745fef1863bb"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "08b902db-e193-4585-9d50-dbd5e8107cb7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1c9074e2c608c9619ac66526598155a8fbd619a3a452d5e624545f6298056731"
+  },
+  "id": "B1BAdOfezqjkdEuz",
+  "tags": []
+}
